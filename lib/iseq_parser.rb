@@ -9,20 +9,20 @@ class IseqParser
   MVSPLA = /(?:#{ V },\s)+#{ V }/
   
   def initialize
-    @tree, @partial = s(), s()
+    @tree, @partial, @stack = s(), s(), s()
   end
   
-  # def argument_names
-  #     iseq.scan /(#{ V })<(Arg|Opt|Rest)/
-  #   end
-  #       
+  def argument_names iseq
+    iseq.to_s.scan /(#{ V })<(Arg|Opt|Rest)/
+  end
+
   #   def parse_iseq iseq
   #     array  = []
-  #     iseq.scan /(?:\d{4}\s)(\w+)(?:\s+)(#{vs}|#{vspla}|#{mvspla}|#{pla})/ do |pair|
+  #     iseq.scan /(?:\d{4}\s)(\w+)(?:\s+)(#{VS}|#{VPLA}|#{MVPLA}|#{PLA})/ do |pair|
   #       case pair.first
   #       when "trace", "leave", "getinlinecache", "setinlinecache"
   #       else
-  #         pair.push *pair.pop.scan(/[^\s,]+/)
+  #         pair.push *pair.pop.scan V
   #         array << pair
   #       end
   #     end
@@ -30,63 +30,78 @@ class IseqParser
   #   end
   
   def parse exp
-    if (sexp = process(exp.compact).compact).size == 1
-      sexp.first
-    else
-      sexp
-    end
+    p exp
+    
+    sexp = process exp
+    
+    sexp || s(:nil)
   end
   
   OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/ }
   
-  def process exp, acc = []
-    return @tree if exp.empty?
-    
-    p '------------'
-    # pp exp
-    val = exp.pop
+  def process exp, acc = s()
+    val  = exp.pop
     inst = val.shift
-    
-    p ">>#{inst}"
+    # p ">>#{inst}-#{val}"
     
     sexp =
     case inst = inst.to_s
-      
     when 'putobject', 'putstring'
       case val = val.first
       when Numeric, Symbol
-         s(:lit, val)
+        s(:lit, val)
+      when true, false
+        s(val.to_s.to_sym)
       when String
-         s(:str, val)
+        s(:str, val)
       end
+    
+    when 'duparray'
+      s(:array, *val.collect{ |v| s(:lit, v)  })
+    
+    when 'newhash', 'newarray'
+      size = val.pop
+      sexp = process exp
+      s( inst.sub('new', '').to_sym, *sexp.shift(size).reverse )
       
     when /opt_\w+/
-      vals = process exp
-      s(:call, vals.pop, OPERATORS[inst], s(:arglist, vals.pop))
+      sexp = process exp
+      s(:call, sexp.pop, OPERATORS[inst], s(:arglist, sexp.pop))
     
     when 'send'
-      method, argcount = val.shift, val.shift 
-      vals    = process exp
-      caller  = vals.pop
-      arglist = s(:arglist, *vals[0...argcount])
-      @tree.shift
-      s(:call, caller, method, arglist)
-      # s(:call, )
-      # s(:call)
+      method, argcount = val.shift, val.shift
+      sexp, args       = process(exp), []
+      
+      while args.size < argcount
+        args.unshift sexp.shift
+      end
+      
+      caller   = sexp.shift || @partial.shift
+      @partial = sexp unless sexp.empty?
+      s(:call, caller, method, s(:arglist, *args))
     
-    
-    when 'leave', 'trace'
+    when 'trace'
+      
+    when 'putnil'
+      # parse exp
+      
+    when 'pop'
+      # til = exp.rindex( [:putnil] ) || 0
+      # process( exp.pop(exp.size - til), a = s() ).first
+      
+    when 'leave'
+      return process(exp).first
+      
     else  
       raise "#{ inst } not valid"
+      
     end
     
-    @tree.push sexp.compact if sexp
-    process exp
-    @tree
+    acc.push sexp    if     sexp
+    process exp, acc unless exp.empty?
+    
+    acc
   end
-  
-  
-
 end
 
 
