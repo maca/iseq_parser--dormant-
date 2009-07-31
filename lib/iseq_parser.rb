@@ -30,11 +30,10 @@ class IseqParser
   #   end
   
   def parse exp
-    p exp
-    
     sexp = process exp
-    
-    sexp || s(:nil)
+    # p sexp
+    return sexp.pop || s(:nil) if sexp.size <= 1
+    sexp.unshift(:block)
   end
   
   OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/ }
@@ -61,8 +60,15 @@ class IseqParser
     
     when 'newhash', 'newarray'
       size = val.pop
-      sexp = process exp
-      s( inst.sub('new', '').to_sym, *sexp.shift(size).reverse )
+      sexp = process exp, acc = s()
+      sexp.push *@stack
+      
+      elements = []
+      while elements.size < size
+        elements << sexp.pop
+      end
+      
+      s( inst.sub('new', '').to_sym, *elements )
       
     when /opt_\w+/
       sexp = process exp
@@ -81,25 +87,25 @@ class IseqParser
       s(:call, caller, method, s(:arglist, *args))
     
     when 'trace'
-      
+    
     when 'putnil'
-      # parse exp
-      
-    when 'pop'
-      # til = exp.rindex( [:putnil] ) || 0
-      # process( exp.pop(exp.size - til), a = s() ).first
-      
-    when 'leave'
-      return process(exp).first
+      # p @stack
+      # p acc
+      # p process(exp)
+      process(exp, @stack)
+      # p exp
+      nil
+        
+    when 'leave', 'pop'
+      return process(exp, @stack)
       
     else  
-      raise "#{ inst } not valid"
+      raise "Instruction #{ inst.inspect } not valid"
       
     end
     
     acc.push sexp    if     sexp
     process exp, acc unless exp.empty?
-    
     acc
   end
 end

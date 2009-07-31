@@ -113,7 +113,7 @@ describe IseqParser do
     
     it "should parse a single method call with no args" do
       parse( compile('a') ).should == rb_parse('a')
-    end
+    end 
     
     it "should parse a single method call with args" do
       parse( compile('a(:one, :two)') ).should == rb_parse('a(:one, :two)')
@@ -131,14 +131,26 @@ describe IseqParser do
   end
   
   describe 'Stack' do
-    it "should several expressions" do
-      parse( compile('a; b(1);') ).should == rb_parse('a; b; c; d')
+    it "should parse several expressions" do
+      parse( compile('1; 2') ).should == rb_parse('1; 2')
+    end
+    
+    it "should parse several expressions" do
+      parse( compile('a; b(1);') ).should == rb_parse('a; b(1);')
+    end
+    
+    it "should parse Array with call with args" do
+      parse( compile('[a(1)]') ).should == rb_parse('[a(1)]')
+    end
+    
+    it "should parse Array with literal and call with args" do
+      parse( compile('[1, a(2, 2)]') ).should == rb_parse('[1, a(2, 2)]')
     end
     
     it "should parse Hash with calls" do
       parse( compile('{:a => 1, :b => 2, :c => c}') ).should  == rb_parse('{:a => 1, :b => 2, :c => c}')
     end
-    
+
     it "should parse not empty Array" do
       parse( compile('[1, :a, a]') ).should  == rb_parse('[1, :a, a]')
     end
