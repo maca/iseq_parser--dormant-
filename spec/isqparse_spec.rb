@@ -3,6 +3,12 @@ require 'ruby_parser'
 require "#{ dir }/klass"
 require 'pp'
 
+module Kernel
+  def ppb str
+    puts str.gsub("\n", '<br />')
+  end
+end
+
 describe IseqParser do
   
   def parse iseq
@@ -109,7 +115,10 @@ describe IseqParser do
     before do
       @op = @op2 = @op3 = @op4 = '**'
     end
-    it_should_behave_like 'expression'
+    
+    it "should parse recursive call" do
+      parse( compile("a.b(1)") ).should == rb_parse("a.b(1)")
+    end
     
     it "should parse a single method call with no args" do
       parse( compile('a') ).should == rb_parse('a')
@@ -124,9 +133,23 @@ describe IseqParser do
       parse( compile(exp) ).should == rb_parse(exp)
     end
     
+    it "should parse method call with args" do
+      exp = 'a(1, 2)'
+      parse( compile(exp) ).should == rb_parse(exp)
+    end
+    
     it "should parse nested method calls" do
+      exp = 'a(b(1, 2))'
+      parse( compile(exp) ).should == rb_parse(exp)
+    end
+    
+    it "should parse nested method calls 2" do
       exp = 'a(b(c(d(), 3), 2), 1)'
       parse( compile(exp) ).should == rb_parse(exp)
+    end
+    
+    it "should parse recursive op" do
+      parse( compile("1#{ @op }2#{ @op2 }3") ).should == rb_parse("1#{ @op }2#{ @op2 }3")
     end
   end
   
@@ -135,7 +158,7 @@ describe IseqParser do
       parse( compile('1; 2') ).should == rb_parse('1; 2')
     end
     
-    it "should parse several expressions" do
+    it "should parse several expressions 2" do
       parse( compile('a; b(1);') ).should == rb_parse('a; b(1);')
     end
     
@@ -144,7 +167,7 @@ describe IseqParser do
     end
     
     it "should parse Array with literal and call with args" do
-      parse( compile('[1, a(2, 2)]') ).should == rb_parse('[1, a(2, 2)]')
+      parse( compile('[1, a(2, 3)]') ).should == rb_parse('[1, a(2, 3)]')
     end
     
     it "should parse Hash with calls" do
@@ -153,6 +176,50 @@ describe IseqParser do
 
     it "should parse not empty Array" do
       parse( compile('[1, :a, a]') ).should  == rb_parse('[1, :a, a]')
+    end
+    
+    it "should parse nested Array" do
+      parse( compile('[a, [b, 1]]') ).should  == rb_parse('[a, [b, 1]]')
+    end
+    
+    it "should parse nested Array 2" do
+      parse( compile('[a, [b, [c, 1]]]') ).should  == rb_parse('[a, [b, [c, 1]]]')
+    end
+    
+    it "should parse nested Array 3" do
+      exp = '[[b, c], [d, e]]'
+      parse( compile(exp) ).should  == rb_parse(exp)
+    end
+    
+    it "should parse nested Array 2" do
+      exp = '[[b, c], a, [d, e]]'
+      parse( compile(exp) ).should  == rb_parse(exp)
+    end
+    
+    it "should parse method call with array" do
+      parse( compile('a([])') ).should == rb_parse('a([])')
+    end
+    
+    it "should parse method call with array" do
+      parse( compile('a([b()])') ).should == rb_parse('a([b()])')
+    end
+    
+    it "should parse method call with array" do
+      parse( compile('a([1, 2, b()])') ).should == rb_parse('a([1, 2, b()])')
+    end
+  end
+  
+  describe 'Assign' do
+    it "should parse lassign" do
+      parse( compile('a = 1') ).should  == rb_parse('a = 1')
+    end
+    
+    it "should parse lassign with call" do
+      parse( compile('a = a(1)') ).should  == rb_parse('a = a(1)')
+    end
+    
+    it "should parse lassign with array" do
+      parse( compile('a = [1, a(2, 2)]') ).should  == rb_parse('a = [1, a(2, 2)]')
     end
   end
   

@@ -9,7 +9,7 @@ class IseqParser
   MVSPLA = /(?:#{ V },\s)+#{ V }/
   
   def initialize
-    @tree, @partial, @stack = s(), s(), s()
+    @tree, @partial, @stack, @sexp = s(), s(), s(), s()
   end
   
   def argument_names iseq
@@ -30,10 +30,8 @@ class IseqParser
   #   end
   
   def parse exp
+    p exp
     sexp = process exp
-    # p sexp
-    return sexp.pop || s(:nil) if sexp.size <= 1
-    sexp.unshift(:block)
   end
   
   OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/ }
@@ -41,7 +39,6 @@ class IseqParser
   def process exp, acc = s()
     val  = exp.pop
     inst = val.shift
-    # p ">>#{inst}-#{val}"
     
     sexp =
     case inst = inst.to_s
@@ -54,21 +51,13 @@ class IseqParser
       when String
         s(:str, val)
       end
+      
+    when 'setlocal'
+      sexp = process(exp)
+      s(:lasgn, :a, *sexp)
     
     when 'duparray'
-      s(:array, *val.collect{ |v| s(:lit, v)  })
-    
-    when 'newhash', 'newarray'
-      size = val.pop
-      sexp = process exp, acc = s()
-      sexp.push *@stack
-      
-      elements = []
-      while elements.size < size
-        elements << sexp.pop
-      end
-      
-      s( inst.sub('new', '').to_sym, *elements )
+      s(:array, *val.collect{|v| s(:lit, v)} )
       
     when /opt_\w+/
       sexp = process exp
@@ -81,31 +70,51 @@ class IseqParser
       while args.size < argcount
         args.unshift sexp.shift
       end
+      caller = sexp.shift
       
-      caller   = sexp.shift || @partial.shift
-      @partial = sexp unless sexp.empty?
-      s(:call, caller, method, s(:arglist, *args))
-    
-    when 'trace'
-    
+      acc.push s(:call, caller, method, s(:arglist, *args))
+      acc.push *sexp
+      return acc
+      
+    when 'newhash', 'newarray'
+      size     = val.pop
+      sexp     = process exp
+      elements = []
+      
+      while elements.size < size
+        elements.unshift sexp.shift
+      end
+      
+      acc.push s( inst.sub('new', '').to_sym, *elements )
+      acc.push *sexp
+      return acc
+      
+
+    when 'dup'
+      return process exp
+      
     when 'putnil'
-      # p @stack
-      # p acc
-      # p process(exp)
-      process(exp, @stack)
-      # p exp
+      # process exp, acc
       nil
         
     when 'leave', 'pop'
-      return process(exp, @stack)
+      sexp = process exp, acc
+      sexp = sexp.pop unless Symbol === sexp.first
+      
+      @sexp.push sexp
+      return @sexp.unshift(:block) if @sexp.size > 1
+      return sexp || s(:nil)
+    
+    when 'trace'
+      return acc
       
     else  
       raise "Instruction #{ inst.inspect } not valid"
       
     end
     
-    acc.push sexp    if     sexp
-    process exp, acc unless exp.empty?
+    acc.push sexp
+    process  exp,  acc unless exp.empty?
     acc
   end
 end
