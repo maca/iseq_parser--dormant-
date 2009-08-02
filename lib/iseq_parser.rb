@@ -1,6 +1,7 @@
 require 'sexp_processor'
 
 class IseqParser
+  attr_reader :locals, :arguments, :iseq
   V      = /[^\s]+/
   VS     = /#{ V }(?=\n)/
   PLA    = /(?=\()/
@@ -8,115 +9,215 @@ class IseqParser
   VSPLA  = /#{ V }#{ SPLA }/
   MVSPLA = /(?:#{ V },\s)+#{ V }/
   
-  def initialize
-    @tree, @partial, @stack, @sexp = s(), s(), s(), s()
-  end
-  
-  def argument_names iseq
-    iseq.to_s.scan /(#{ V })<(Arg|Opt|Rest)/
-  end
+  class << self
+    def argument_names iseq
+      iseq.to_s.scan /(#{ V })<(Arg|Opt|Rest)/
+    end
 
-  #   def parse_iseq iseq
-  #     array  = []
-  #     iseq.scan /(?:\d{4}\s)(\w+)(?:\s+)(#{VS}|#{VPLA}|#{MVPLA}|#{PLA})/ do |pair|
-  #       case pair.first
-  #       when "trace", "leave", "getinlinecache", "setinlinecache"
-  #       else
-  #         pair.push *pair.pop.scan V
-  #         array << pair
-  #       end
-  #     end
-  #     array
-  #   end
+    def iseq_from_string iseq
+      iseq.scan( /(?:\d{4}\s)(\w+)(?:\s+)(#{ VS }|#{ VSPLA }|#{ MVSPLA }|#{ PLA })/ ).collect do |pair|
+        values = pair.pop.scan( /(?:\w|:|\d)+/ ).collect do |value|
+          val  = 
+          case value
+          when /:[^\s]+/  then value.gsub(':', '').to_sym
+          when /\d+/      then value.to_i
+          when 'nil'      then nil
+          when 'true'     then true
+          else value end 
+        end
+        pair.push *values
+      end
+    end
   
-  def parse exp
-    p exp
-    sexp = process exp
+    def argument_values iseq
+      iseq_array = iseq_from_string iseq
+      argument_names( iseq ).collect do |pair|
+        name, type = pair
+        consumed   = []
+        next pair unless type == 'Opt'
+        until (ins = iseq_array.shift) == ['setlocal', name ]
+          consumed.push ins
+        end
+        pair[1] = new([consumed.push(['leave'])]).parse
+        pair
+      end
+    end
   end
   
-  OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/ }
+  def initialize iseq
+    p iseq
+    @context   = iseq[7]
+    @locals    = iseq[8]
+    @arguments = iseq[9]
+    @sexp      = s()
+    @labels    = {}
+    @iseq      = iseq.last
+  end
+  
+  def parse
+    sexp = process @iseq
+    return sexp unless sexp.first == :block
+    sexp.compact!
+    return sexp.pop if sexp.size == 2
+    sexp
+  end
+  
+  # opt_neg
+  OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/, "opt_mod" => :%,  
+                "opt_eq" => :==, 'opt_le' => :<=, 'opt_gt' => :>, 'opt_ge' => :>=, 'opt_ltlt' => :<<,
+                'opt_aref' => :[], 'opt_aset' => :[]=, 'opt_length' => :size }
+  GETS      = { 'getconstant' => :const, 'getlocal' => :lvar, 'getinstancevariable' => :ivar, 'getclassvariable' => :cvar }
+  SETS      = { 'setlocal' => :lasgn, 'setinstancevariable' => :iasgn, 'setclassvariable' => :cvdecl }
   
   def process exp, acc = s()
-    val  = exp.pop
-    inst = val.shift
-    
-    sexp =
+    return acc if exp.empty?
+      values  = exp.pop
+    if Array === values
+      inst    = values.shift
+    else
+      inst    = values
+    end
+    remaining = s()
+    consumed  =
     case inst = inst.to_s
-    when 'putobject', 'putstring'
-      case val = val.first
-      when Numeric, Symbol
-        s(:lit, val)
-      when true, false
-        s(val.to_s.to_sym)
-      when String
-        s(:str, val)
-      end
       
-    when 'setlocal'
-      sexp = process(exp)
-      s(:lasgn, :a, *sexp)
-    
+    when 'putobject', 'putstring'
+      case value = values.first
+      when Numeric, Symbol
+        s(:lit, value)
+      when true, false
+        s(value.to_s.to_sym)
+      when String  
+        s(:str, value)
+      end
+
+    when *GETS.keys
+      name = values.pop
+      name = @locals[name * -1 + 1] if inst == 'getlocal'
+      s(GETS[inst], name)
+      
+    when *SETS.keys
+      name      = values.first
+      name      = @locals[name * -1 + 1] if inst == 'setlocal'
+      remaining = process exp
+      result    = s(SETS[inst], name, remaining.shift || @sexp.pop)
+      @sexp << result 
+      nil
+
     when 'duparray'
-      s(:array, *val.collect{|v| s(:lit, v)} )
+      s(:array, *values.collect{|v| s(:lit, v)} )
+      
+    when 'opt_not'
+      s(inst.to_s.gsub('opt_', '').to_sym, *process(exp))
       
     when /opt_\w+/
-      sexp = process exp
-      s(:call, sexp.pop, OPERATORS[inst], s(:arglist, sexp.pop))
+      remaining = process exp
+      s(:call, remaining.pop, OPERATORS[inst], s(:arglist, remaining.pop))
     
     when 'send'
-      method, argcount = val.shift, val.shift
-      sexp, args       = process(exp), []
+      method, argcount = values.shift, values.shift
+      remaining, args  = process(exp), []
       
-      while args.size < argcount
-        args.unshift sexp.shift
+      if method == :'core#define_method'
+        # ppb <<-V
+        #  
+        #    @sexp: #{ @sexp }
+        #    
+        #    acc:   #{ acc }
+        #    
+        #    sexp:  #{ remaining }
+        #    
+        #  V
+        p remaining[0][1][1] if @optionals  # Stinks!!
+        
+        name   = remaining.pop
+        block  = remaining.pop
+        s(:defn, name.last, s(:args, *@defargs), block)
+      else
+        args.unshift remaining.shift || @sexp.pop while args.size < argcount
+        caller = remaining.shift
+        s(:call, caller, method, s(:arglist, *args))
       end
-      caller = sexp.shift
-      
-      acc.push s(:call, caller, method, s(:arglist, *args))
-      acc.push *sexp
-      return acc
       
     when 'newhash', 'newarray'
-      size     = val.pop
-      sexp     = process exp
-      elements = []
-      
-      while elements.size < size
-        elements.unshift sexp.shift
-      end
-      
-      acc.push s( inst.sub('new', '').to_sym, *elements )
-      acc.push *sexp
-      return acc
-      
+      size, elements = values.pop, []
+      remaining      = process exp
+      elements.unshift remaining.shift || @sexp.pop while elements.size < size
+      s( inst.sub('new', '').to_sym, *elements )
 
     when 'dup'
       return process exp
       
+    when /\d+/
+      return process exp
+      
+    when /label/
+      @label = inst
+      sexp   = process exp
+      if @labels.delete inst
+        return s(:and, @sexp.pop, sexp.shift)
+      end
+      return sexp
+      
+    when 'branchunless'
+      @labels[values.pop.to_s] = inst
+      return process(exp)
+      
     when 'putnil'
-      # process exp, acc
       nil
         
-    when 'leave', 'pop'
-      sexp = process exp, acc
-      sexp = sexp.pop unless Symbol === sexp.first
-      
-      @sexp.push sexp
-      return @sexp.unshift(:block) if @sexp.size > 1
-      return sexp || s(:nil)
+    when 'pop'
+      sexp = process exp
+      sexp = [sexp] if Symbol === sexp.first
+      @sexp.push *sexp
+      nil
     
+    when 'leave'
+      @sexp.push *process( exp, acc )
+      result = @sexp.dup and @sexp.clear
+      return result.pop || s(:nil) unless result.size > 1
+      result.unshift :block unless Symbol === result.first
+      return result
+      
     when 'trace'
-      return acc
+      return process exp
       
-    else  
+    when 'defineclass'
+      remaining    = process exp
+      name         = values.shift
+      instructions = values.shift
+      body         = self.class.new(instructions).parse
+      scope        = s(:scope)
+      scope.push body unless body == s(:nil)
+      s(:class, name, remaining.pop, scope)
+      
+    when 'putiseq'
+      parser    = self.class.new *values
+      sexp      = parser.parse
+      argcount  =
+      if Fixnum === parser.arguments
+        parser.arguments
+      else
+        @optionals = true
+        parser.arguments[1].size - 1
+      end
+      @defargs  = parser.locals[0...argcount]
+      s(:scope, s(:block, sexp))
+      
+    when 'putspecialobject'
+      return process exp
+      
+    when 'setinlinecache', 'getinlinecache'
+      return process exp
+      
+    else
+      # return process exp
       raise "Instruction #{ inst.inspect } not valid"
-      
     end
     
-    acc.push sexp
-    process  exp,  acc unless exp.empty?
+    acc.push consumed
+    acc.push *remaining  unless remaining.empty?
+    process  exp,  acc   unless exp.empty?
     acc
   end
 end
-
-

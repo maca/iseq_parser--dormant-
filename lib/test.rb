@@ -1,5 +1,6 @@
 require 'iseq_parser'
 require 'ruby_parser'
+require 'pp'
 
 module Kernel 
 def ppb
@@ -7,7 +8,7 @@ end
 end
 
 def parse iseq
-  IseqParser.new.parse iseq
+  IseqParser.new(iseq).parse
 end
 
 def rb_parse string
@@ -15,11 +16,10 @@ def rb_parse string
 end
 
 def compile string
-  RubyVM::InstructionSequence.compile( string ).to_a.last.reject{ |e| not Array === e  }
+  RubyVM::InstructionSequence.compile( string ).to_a
 end
 
-a = parse( compile('[a, [b, 1]]') )
-b = rb_parse('[a, [b, 1]]')
 
-exp = "1 ** 2 ** 3"
-parse( compile(exp) ).should == rb_parse(exp)
+pp compile <<-RUBY_EVAL
+def hola(a = 1, b = 2); c = 1; end
+RUBY_EVAL
