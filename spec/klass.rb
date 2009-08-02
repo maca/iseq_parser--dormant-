@@ -12,9 +12,11 @@ class Klass
     [one, two, three, yield]
   end
   
-  def asr attackTime = 3, sustainLevel = 2, releaseTime = 1, curve = 0
-    [attackTime, sustainLevel, releaseTime, curve]
+  def with_hash_and_calls hash = {:a => Klass.new(1,2), :b => 2, :c => [[5]]}
+    [one, two, three, yield]
   end
+  
+
   
   def no_args
     begin

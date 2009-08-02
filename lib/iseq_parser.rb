@@ -45,13 +45,18 @@ class IseqParser
   end
   
   def initialize iseq
-    p iseq
+    # p iseq
     @context   = iseq[7]
     @locals    = iseq[8]
     @arguments = iseq[9]
     @sexp      = s()
     @labels    = {}
-    @iseq      = iseq.last
+    rejected   = [:getinlinecache, :setinlinecache, :dup]
+    @iseq      = iseq.last.reject do |i| 
+      next true unless Array === i
+      rejected.include?( i.first.to_sym )
+    end
+    # p @iseq
   end
   
   def parse
@@ -69,7 +74,7 @@ class IseqParser
   GETS      = { 'getconstant' => :const, 'getlocal' => :lvar, 'getinstancevariable' => :ivar, 'getclassvariable' => :cvar }
   SETS      = { 'setlocal' => :lasgn, 'setinstancevariable' => :iasgn, 'setclassvariable' => :cvdecl }
   
-  def process exp, acc = s()
+  def process exp, acc = s(), remaining = s()
     return acc if exp.empty?
       values  = exp.pop
     if Array === values
@@ -77,9 +82,21 @@ class IseqParser
     else
       inst    = values
     end
-    remaining = s()
+    
+    
     consumed  =
     case inst = inst.to_s
+      
+    # when /label/
+    #   @label = inst
+    #   process(exp).pop
+    #   # p "the sexp #{sexp}"
+    #   # 
+    #   # if @labels.delete( inst ) == 'branchunless'
+    #   #   s(:and, @sexp.pop, remaining.shift)
+    #   # else
+    #   #   sexp.pop
+    #   # end
       
     when 'putobject', 'putstring'
       case value = values.first
@@ -119,24 +136,14 @@ class IseqParser
       remaining, args  = process(exp), []
       
       if method == :'core#define_method'
-        # ppb <<-V
-        #  
-        #    @sexp: #{ @sexp }
-        #    
-        #    acc:   #{ acc }
-        #    
-        #    sexp:  #{ remaining }
-        #    
-        #  V
-        p remaining[0][1][1] if @optionals  # Stinks!!
-        
+        remaining[0][1][1] if @optionals  # !!!
         name   = remaining.pop
         block  = remaining.pop
         s(:defn, name.last, s(:args, *@defargs), block)
       else
         args.unshift remaining.shift || @sexp.pop while args.size < argcount
-        caller = remaining.shift
-        s(:call, caller, method, s(:arglist, *args))
+        receiver = remaining.shift
+        s(:call, receiver, method, s(:arglist, *args))
       end
       
     when 'newhash', 'newarray'
@@ -145,27 +152,22 @@ class IseqParser
       elements.unshift remaining.shift || @sexp.pop while elements.size < size
       s( inst.sub('new', '').to_sym, *elements )
 
-    when 'dup'
-      return process exp
-      
-    when /\d+/
-      return process exp
-      
-    when /label/
-      @label = inst
-      sexp   = process exp
-      if @labels.delete inst
-        return s(:and, @sexp.pop, sexp.shift)
-      end
-      return sexp
-      
+    # when 'dup'
+    #   return process exp
+
     when 'branchunless'
       @labels[values.pop.to_s] = inst
       return process(exp)
-      
+
     when 'putnil'
       nil
-        
+      
+    when 'getinlinecache'
+      return process exp
+
+    when 'setinlinecache'
+      return process exp
+                
     when 'pop'
       sexp = process exp
       sexp = [sexp] if Symbol === sexp.first
@@ -207,8 +209,8 @@ class IseqParser
     when 'putspecialobject'
       return process exp
       
-    when 'setinlinecache', 'getinlinecache'
-      return process exp
+    # when /\d+/
+    #   return process exp
       
     else
       # return process exp

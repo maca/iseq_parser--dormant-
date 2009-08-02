@@ -126,6 +126,11 @@ describe IseqParser do
       parse( compile(exp) ).should == rb_parse(exp)
     end
     
+    it "should parse method call with args and receiver" do
+       exp = 'Klass.new(1, 2, 3)'
+       parse( compile(exp) ).should == rb_parse(exp)
+     end
+    
     it "should parse nested method calls" do
       exp = 'a(b(1, 2))'
       parse( compile(exp) ).should == rb_parse(exp)
@@ -201,6 +206,16 @@ describe IseqParser do
     
     it "should parse method call with array" do
       parse( compile('a([1, 2, b()])') ).should == rb_parse('a([1, 2, b()])')
+    end
+    
+    it "should parse {:a => Klass.new(1,2), :b => 2}" do
+      exp = '{:a => Klass.new(1,2), :b => 2}'
+      parse( compile(exp) ).should  == rb_parse(exp)
+    end
+    
+    it "should parse {:a => Klass.new(1,2), :b => 2, :c => [[5]]}" do
+      exp = '{:a => Klass.new(1,2), :b => 2, :c => [[]]}'
+      parse( compile(exp) ).should  == rb_parse(exp)
     end
   end
   
