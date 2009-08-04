@@ -51,12 +51,13 @@ class IseqParser
     @arguments = iseq[9]
     @sexp      = s()
     @labels    = {}
-    rejected   = [:getinlinecache, :setinlinecache, :dup]
+    rejected   = [:dup, :getinlinecache]
     @iseq      = iseq.last.reject do |i| 
-      next true unless Array === i
+      next false if   Symbol === i
+      next true unless Array === i 
       rejected.include?( i.first.to_sym )
     end
-    # p @iseq
+    p @iseq
   end
   
   def parse
@@ -66,7 +67,6 @@ class IseqParser
     return sexp.pop if sexp.size == 2
     sexp
   end
-  
   # opt_neg
   OPERATORS = { 'opt_mult' => :*, 'opt_plus' => :+, "opt_minus" => :-, "opt_div" => :/, "opt_mod" => :%,  
                 "opt_eq" => :==, 'opt_le' => :<=, 'opt_gt' => :>, 'opt_ge' => :>=, 'opt_ltlt' => :<<,
@@ -83,20 +83,8 @@ class IseqParser
       inst    = values
     end
     
-    
     consumed  =
     case inst = inst.to_s
-      
-    # when /label/
-    #   @label = inst
-    #   process(exp).pop
-    #   # p "the sexp #{sexp}"
-    #   # 
-    #   # if @labels.delete( inst ) == 'branchunless'
-    #   #   s(:and, @sexp.pop, remaining.shift)
-    #   # else
-    #   #   sexp.pop
-    #   # end
       
     when 'putobject', 'putstring'
       case value = values.first
@@ -152,21 +140,59 @@ class IseqParser
       elements.unshift remaining.shift || @sexp.pop while elements.size < size
       s( inst.sub('new', '').to_sym, *elements )
 
-    # when 'dup'
-    #   return process exp
+    when /label/
+      remaining = process exp
+      inst_sexp = @labels.delete(inst)
+      
+      if Array === inst_sexp
+        case inst_sexp.first
+        when 'branchunless'
+
+          ppb <<-A
+          
+          #{ inst_sexp.first }
+          #{ inst }:
+
+          remaining #{ remaining }
+
+          @sexp #{ @sexp }
+
+          brancun #{ inst_sexp.last }
+          A
+
+          p s(:and, inst_sexp.last.shift, remaining.shift || @sexp.pop)
+        when 'branchif'
+          ppb <<-S
+          
+          #{ inst_sexp.first }
+          #{ inst }:
+
+          remaining #{ remaining }
+
+          @sexp #{ @sexp }
+
+          brancun #{ inst_sexp.last }
+          S
+          p s(:or, inst_sexp.last.shift, remaining.shift || @shift.pop)
+        end
+      else
+        remaining.shift
+      end
 
     when 'branchunless'
-      @labels[values.pop.to_s] = inst
-      return process(exp)
+      @labels[values.pop.to_s] = [inst, process(exp)]
+      nil
+    
+    when 'branchif'
+      @labels[values.pop.to_s] = [inst, process(exp)]
+      nil
 
     when 'putnil'
       nil
-      
-    when 'getinlinecache'
-      return process exp
 
     when 'setinlinecache'
-      return process exp
+      remaining = process exp
+      remaining.shift
                 
     when 'pop'
       sexp = process exp
@@ -177,6 +203,7 @@ class IseqParser
     when 'leave'
       @sexp.push *process( exp, acc )
       result = @sexp.dup and @sexp.clear
+      result.compact!
       return result.pop || s(:nil) unless result.size > 1
       result.unshift :block unless Symbol === result.first
       return result
@@ -213,7 +240,6 @@ class IseqParser
     #   return process exp
       
     else
-      # return process exp
       raise "Instruction #{ inst.inspect } not valid"
     end
     

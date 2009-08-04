@@ -20,13 +20,23 @@ describe 'Logic' do
     parse( compile(exp) ).should  == rb_parse(exp)
   end
   
+  it "should parse or" do
+    exp = 'a or b'
+    parse( compile(exp) ).should  == rb_parse(exp)
+  end
+  
+  it "should parse && and ||" do
+    exp = 'a || b && c || d'
+    parse( compile(exp) ).should  == rb_parse(exp)
+  end
+  
   it "should parse true" do
     parse( compile('do_right if loved') ).should  == rb_parse("loved and do_right")
   end
   
   it "should parse if else" do
     exp =  <<-RUBY_EVAL
-    if true
+    if good
       do_true
       nice
     else
