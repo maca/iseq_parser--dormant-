@@ -1,6 +1,8 @@
 require 'sexp_processor'
 
 class IseqParser
+  VERSION = '0.0.1'
+  
   attr_reader :locals, :arguments, :iseq
   V      = /[^\s]+/
   VS     = /#{ V }(?=\n)/
